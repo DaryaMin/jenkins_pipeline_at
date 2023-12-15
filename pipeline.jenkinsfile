@@ -1,0 +1,59 @@
+pipeline {
+    agent {
+        node {
+            label 'company.test.vm.ru'
+        }
+    }
+    triggers {
+            cron('H 7 * * *')
+    }
+    parameters{
+        choice(choices: ['regress', 'smoke'], description: 'Выбор сьюта для запуска', name: 'suiteToRun')
+    }
+    environment{
+        mailRecipients = 'dminakova@cinimex.ru'
+        TEST_CREDS = credentials('444444444')
+    }
+    stages {
+        stage('clone repo') {
+            steps{
+                checkout([$class                           : 'GitSCM', branches: [[name: '*/master']],
+                          doGenerateSubmoduleConfigurations: false,
+                          extensions                       : [],
+                          submoduleCfg                     : [],
+                          userRemoteConfigs                : [[credentialsId: '22222222',
+                                                               url          :  'https://git.company.ru/java_example.git']]
+                          ])
+            }
+        }
+        stage('run tests') {
+            steps{
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    withMaven(jdk: 'JDK 8u172', maven: 'Maven 3.6.3') {
+                        sh 'mvn clean install -Dgroups=${suiteToRun}'
+                    }
+                }
+            }
+        }
+        stage('run allure reports') {
+            steps {
+                allure([includeProperties: true,
+                                      jdk: '',
+                               properties: [],
+                        reportBuildPolicy: 'ALWAYS',
+                                  results: [[path: '**/allure-results']]
+                ])
+            }
+        }
+    }
+    post {
+        always{
+            echo 'Pipeline is complete'
+            emailext (
+            subject: "CMXQA.TESTS Отчет прогона тестов [${env.BUILD_NUMBER}] ",
+            body:"""Подробный allure-отчет: "<a href='${env.BUILD_URL}allure/'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>"</p>""",
+            to: "${env.mailRecipients}"
+            )
+        }
+    }
+}
